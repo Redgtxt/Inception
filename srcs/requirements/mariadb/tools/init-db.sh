@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #Checks if BD directory already exists
-if [-d "/var/lib/mysql/$DB_NAME"]
+if [ -d "/var/lib/mysql/$DB_NAME" ]
 then
     echo "Database '$DB_NAME' already exists.Starting normally..."
 else

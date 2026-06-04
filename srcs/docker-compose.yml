@@ -12,7 +12,43 @@ services:
       - inception
     volumes:
       - mariadb:/var/lib/mysql
-    
+
+  wordpress:
+    container_name: wordpress
+    image: wordpress
+    build: 
+      context: ./requirements/wordpress
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    restart: always
+    depends_on:
+      - mariadb
+    networks:
+      - inception
+    volumes:
+      - wordpress:/var/www/html
+
+  nginx:
+    container_name: nginx
+    image: nginx
+    build: 
+      context: ./requirements/nginx
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    restart: always
+    ports:
+      - "443:443"
+    depends_on:
+      - wordpress
+    networks:
+      - inception
+    #Nginx shares the same volume as Wordpress to serve the files
+    volumes:
+      - wordpress:/var/www/html
+      
+
 networks:
   inception:
     driver: bridge
@@ -26,4 +62,11 @@ volumes:
       type: none
       o: bind
       device: ${HOME_DIR}/data/mariadb
-      
+
+  wordpress:
+    driver: local
+    name: wordpress
+    driver_opts:
+      type: none
+      o: bind
+      device: ${HOME_DIR}/data/wordpress
