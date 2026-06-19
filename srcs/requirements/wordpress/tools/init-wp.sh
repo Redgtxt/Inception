@@ -1,8 +1,14 @@
 #!/bin/bash
 
-#Since all containers start at the same time, we need to wait for the database to be ready before starting WordPress.
+# Read the passwords from the Docker secrets files
+# Ensure that the variables are populated before attempting to connect to the database
+DB_PASSWORD=$(cat /run/secrets/db_password)
+WP_ADMIN_PASSWORD=$(cat /run/secrets/wp_admin_password)
+WP_USER_PASSWORD=$(cat /run/secrets/wp_user_password)
+
+# Since all containers start at the same time, we need to wait for the database to be ready before starting WordPress.
 echo "Waiting for the connection to the database MariaDB..."
-while ! mariadb -h mariadb -u${DB_USER} -p${DB_PASSWORD} -e "SeLECT 1" &> /dev/null; do
+while ! mariadb -h mariadb -u${DB_USER} -p${DB_PASSWORD} -e "SELECT 1" &> /dev/null; do
     sleep 3
 done
 echo "Connected to the database MariaDB!"
@@ -35,7 +41,6 @@ if [ ! -f "wp-config.php" ]; then
         --role=author \
         --user_pass=${WP_USER_PASSWORD} \
         --allow-root
-
 
     echo "WordPress installation completed!"
 else

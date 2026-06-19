@@ -7,6 +7,10 @@ then
 else
     echo "First Start detected.Configurating MariaDB..."
 
+    #Read the secrets from the docker secrets files And store them in variables
+    DB_PASSWORD=$(cat /run/secrets/db_password)
+    DB_ROOT_PASSWORD=$(cat /run/secrets/db_root_password)
+
     #start mariadb temporarily in background so we can enject sql comands
     service mariadb start
 
