@@ -34,7 +34,9 @@ EOF
     sleep 1
 fi 
 
-#exec will replace the script with the process mysqld_safe
-#In that way MariaDB is now running in the foregound
+#exec replaces the script (PID 1) directly with mariadbd instead of the
+#mysqld_safe wrapper, which does not forward signals correctly and is not
+#recommended as PID 1 in a container. --user=mysql is required since this
+#process is started as root.
 echo "Starting MariaDB in foreground..."
-exec mysqld_safe
+exec mariadbd --user=mysql

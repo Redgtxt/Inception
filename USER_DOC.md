@@ -6,6 +6,14 @@
 
 Welcome to the Inception infrastructure. This document is intended for end-users and evaluators who need to interact with the deployed services. It outlines how to access the website, manage content via WordPress, and verify the basic operational status of the containers.
 
+### Services Provided
+
+| Service | Role |
+|---|---|
+| **NGINX** | Single entrypoint of the stack. Serves the site over HTTPS (port 443) and forwards PHP requests to WordPress. |
+| **WordPress + php-fpm** | The content management system that powers the website and its admin panel. |
+| **MariaDB** | Database that stores all WordPress content, settings, and user accounts. |
+
 ---
 
 ## 1. Accessing the Website
@@ -35,7 +43,11 @@ Navigate to the admin login page:
 https://hguerrei.42.fr/wp-admin
 ```
 
-You will be greeted by the standard WordPress login screen. Enter the administrator credentials defined in the `.env` file during the initial setup. Once logged in, you will have full control over the site's content and configuration.
+You will be greeted by the standard WordPress login screen. Enter the administrator credentials generated during the initial setup.
+
+> **Locating credentials:** Usernames (e.g. the admin login) live in `srcs/.env`. Passwords are **not** stored there — they live as Docker secrets in the `secrets/` folder at the root of the repository (`wp_admin_password.txt`, `wp_user_password.txt`, `db_password.txt`, `db_root_password.txt`), generated once by `setup.sh`. This folder is git-ignored and should never be committed.
+
+Once logged in, you will have full control over the site's content and configuration.
 
 ### User Roles
 

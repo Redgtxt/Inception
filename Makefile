@@ -1,6 +1,7 @@
 #Variables
 COMPOSE_FILE = srcs/docker-compose.yml
-DATA_DIR = /home/redgtxt/data
+LOGIN = $(shell whoami)
+DATA_DIR = /home/$(LOGIN)/data
 
 #Names of the folders
 DB_DIR = $(DATA_DIR)/mariadb
@@ -34,9 +35,11 @@ stop:
 start:
 	docker compose -f $(COMPOSE_FILE) start
 
-#Deep clean for the containers, removes images, networks and volumes
-clean: down
-	docker system prune -af --volumes
+#Deep clean for the containers, removes this project's images and volumes
+#(scoped to inception, unlike `docker system prune` which would wipe
+#unrelated images/volumes on the host)
+clean:
+	docker compose -f $(COMPOSE_FILE) down --rmi all --volumes
 
 #Execute clean and erases the folders, .env and secrets from the machine
 fclean: clean

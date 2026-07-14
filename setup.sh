@@ -18,6 +18,11 @@ echo -e "${GREEN}Initing Enviromental Variables Config and Docker Secrets...${NC
 
 echo -e "${YELLOW}>Generating env file srcs/.env...${NC}"
 
+# The 42 login is taken from the current system user, so this file always
+# matches whichever machine/session it is generated on (e.g. redgtxt on the
+# dev VM, hguerrei on the evaluation VM), without needing manual edits.
+LOGIN=$(whoami)
+
 cat << EOF > srcs/.env
 
 # ==========================================
@@ -26,8 +31,8 @@ cat << EOF > srcs/.env
 
 # ==========================================
 
-DOMAIN_NAME=hguerrei.42.fr
-HOME_DIR=/home/redgtxt
+DOMAIN_NAME=${LOGIN}.42.fr
+HOME_DIR=/home/${LOGIN}
 
 
 # ==========================================
