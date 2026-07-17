@@ -2,9 +2,11 @@ services:
   mariadb:
     container_name: mariadb
     image: mariadb:inception
-    build: 
+    build:
       context: ./requirements/mariadb
       dockerfile: Dockerfile
+      args:
+        - DB_PORT=${DB_PORT}
     env_file:
       - .env
     restart: always
@@ -19,9 +21,11 @@ services:
   wordpress:
     container_name: wordpress
     image: wordpress:inception
-    build: 
+    build:
       context: ./requirements/wordpress
       dockerfile: Dockerfile
+      args:
+        - WP_PORT=${WP_PORT}
     env_file:
       - .env
     restart: always
@@ -44,11 +48,13 @@ services:
       dockerfile: Dockerfile
       args:
         - DOMAIN_NAME=${DOMAIN_NAME}
+        - NGINX_PORT=${NGINX_PORT}
+        - WP_PORT=${WP_PORT}
     env_file:
       - .env
     restart: always
     ports:
-      - "443:443"
+      - "${NGINX_PORT}:${NGINX_PORT}"
     depends_on:
       - wordpress
     networks:

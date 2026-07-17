@@ -19,8 +19,7 @@ echo -e "${GREEN}Initing Enviromental Variables Config and Docker Secrets...${NC
 echo -e "${YELLOW}>Generating env file srcs/.env...${NC}"
 
 # The 42 login is taken from the current system user, so this file always
-# matches whichever machine/session it is generated on (e.g. redgtxt on the
-# dev VM, hguerrei on the evaluation VM), without needing manual edits.
+# matches whichever machine/session it is generated on
 LOGIN=$(whoami)
 
 cat << EOF > srcs/.env
@@ -45,6 +44,8 @@ DB_NAME=wordpress_db
 
 DB_USER=wp_user_normal
 
+DB_PORT=3306
+
 # ==========================================
 
 # Configuration of WordPress
@@ -58,6 +59,16 @@ WP_ADMIN_EMAIL=Emperor@42lisboa.com
 WP_USER=visitor
 
 WP_USER_EMAIL=visitor@42lisboa.com
+
+WP_PORT=9000
+
+# ==========================================
+
+# Configuration of Nginx
+
+# ==========================================
+
+NGINX_PORT=443
 
 EOF
 

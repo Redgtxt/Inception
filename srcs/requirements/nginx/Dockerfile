@@ -1,10 +1,10 @@
 #vamos usar a penultima versao
 FROM debian:bookworm
 
-#Login/domain is injected at build time so it is never hardcoded (matches
-#whichever user builds the image, e.g. redgtxt on the dev VM or hguerrei on
-#the evaluation VM)
+#Login/domain and ports are injected at build time so they are never hardcoded
 ARG DOMAIN_NAME
+ARG NGINX_PORT
+ARG WP_PORT
 
 #Update the packages and install Nginx
 RUN apt-get update && apt-get install -y \
@@ -25,13 +25,15 @@ RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 RUN mkdir -p /var/run/nginx
 
 #Copy the nginx configuration file to the container and replace the
-#${DOMAIN_NAME} placeholder, since nginx does not expand shell-style
-#environment variables in its own config files
+#placeholders, since nginx does not expand shell-style environment
+#variables in its own config files
 COPY ./conf/nginx.conf /etc/nginx/nginx.conf
-RUN sed -i "s/\${DOMAIN_NAME}/${DOMAIN_NAME}/" /etc/nginx/nginx.conf
+RUN sed -i "s/\${DOMAIN_NAME}/${DOMAIN_NAME}/" /etc/nginx/nginx.conf && \
+    sed -i "s/\${NGINX_PORT}/${NGINX_PORT}/g" /etc/nginx/nginx.conf && \
+    sed -i "s/\${WP_PORT}/${WP_PORT}/g" /etc/nginx/nginx.conf
 
 #Port where the services will comunicate
-EXPOSE 443
+EXPOSE ${NGINX_PORT}
 
 #Define the command to start nginx in the foreground
 #daemon off is used to keep nginx running in the foreground, which is necessary for the container to keep running

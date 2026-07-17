@@ -31,6 +31,8 @@ https://hguerrei.42.fr
 >
 > To proceed: click **Advanced** and select **Proceed to hguerrei.42.fr (unsafe)**. This is expected behavior and confirms that TLSv1.2/1.3 encryption is active.
 
+> **Note on custom ports:** NGINX's port is controlled by `NGINX_PORT` in `srcs/.env` (default `443`). If it's set to anything else, you must type the port **and** the `https://` scheme explicitly in the address bar (e.g. `https://hguerrei.42.fr:8443`) — on non-standard ports, browsers default to plain HTTP, which NGINX rejects with `400 Bad Request` since it only serves SSL.
+
 ---
 
 ## 2. Managing Content (WordPress Admin)
@@ -70,13 +72,14 @@ If you need to start, stop, or reset the infrastructure, use the provided `Makef
 | `make down` | Safely stops all services and removes the internal network. |
 | `make stop` | Pauses the running containers without removing them. |
 | `make start` | Resumes stopped containers. |
+| `make db` | Opens a MySQL shell inside the `mariadb` container, already logged in as `root` (shortcut for the manual steps in the next section). |
 | `make clean` | Stops and removes containers, images, and the internal Docker network. |
 
 ---
 
 ## 4. Interacting with MariaDB
 
-You can connect directly to the MariaDB container to inspect or query the database. First, open a shell inside the container:
+You can connect directly to the MariaDB container to inspect or query the database. The quickest way is `make db`, which opens a shell already logged in as `root`. Alternatively, do it manually: first, open a shell inside the container:
 
 ```bash
 docker exec -it mariadb mariadb -u <user> -p
@@ -168,4 +171,13 @@ docker logs nginx
 docker logs wordpress
 # or
 docker logs mariadb
+```
+
+### Page Keeps Redirecting to the Wrong Port / "Unable to Connect"
+
+If you changed `NGINX_PORT` in `srcs/.env` on an infrastructure that was already running (without a full `make re`), the browser may end up "unable to connect" after being redirected to a URL without the port. This happens because WordPress stores its own site URL in the database at install time, and that only gets refreshed on a fresh install. Fix it without losing data:
+
+```bash
+docker exec wordpress wp option update siteurl "https://hguerrei.42.fr:<port>" --allow-root
+docker exec wordpress wp option update home "https://hguerrei.42.fr:<port>" --allow-root
 ```

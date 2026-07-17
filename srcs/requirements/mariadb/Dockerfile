@@ -1,6 +1,10 @@
 #vamos usar a penultima versao
 FROM debian:bookworm
 
+#Port is injected at build time so it can be changed from .env without
+#touching this file
+ARG DB_PORT
+
 #Update the packages and install MariaDb server
 #rm -rf will clean the cache from apt
 RUN apt-get update && apt-get install -y mariadb-server && \
@@ -8,6 +12,10 @@ RUN apt-get update && apt-get install -y mariadb-server && \
 
 #config Mariadb to accept connections from every ip(0.0.0.0) instead of the localhost
 RUN sed -i 's/bind-address\s*=\s*127.0.0.1/bind-address = 0.0.0.0/' /etc/mysql/mariadb.conf.d/50-server.cnf
+
+#Set the port MariaDB listens on. Uses its own conf file (loaded after
+#50-server.cnf) so it always wins regardless of what 50-server.cnf contains
+RUN printf '[mysqld]\nport = %s\n' "${DB_PORT}" > /etc/mysql/mariadb.conf.d/60-port.cnf
 
 #Creates the execution folder MySQL and give perms
 RUN mkdir -p /var/run/mysqld && \
@@ -21,7 +29,7 @@ COPY ./tools/init-db.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/init-db.sh
 
 #Port where the services will comunicate
-EXPOSE 3306
+EXPOSE ${DB_PORT}
 
 #Define the scipt has the main comando when the container starts
 ENTRYPOINT [ "/usr/local/bin/init-db.sh" ]

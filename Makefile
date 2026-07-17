@@ -35,6 +35,10 @@ stop:
 start:
 	docker compose -f $(COMPOSE_FILE) start
 
+#Opens an interactive MySQL shell inside the mariadb container, logged in as root
+db:
+	docker exec -it mariadb mariadb -u root -p"$$(cat secrets/db_root_password.txt)" $$(grep -m1 '^DB_NAME=' $(ENV_FILE) | cut -d '=' -f2)
+
 #Deep clean for the containers, removes this project's images and volumes
 #(scoped to inception, unlike `docker system prune` which would wipe
 #unrelated images/volumes on the host)
@@ -49,4 +53,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all setup up down stop start clean fclean re
+.PHONY: all setup up down stop start db clean fclean re

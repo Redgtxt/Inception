@@ -26,7 +26,7 @@ Add the following line to map the domain to your local IP:
 127.0.0.1    hguerrei.42.fr
 ```
 
-You must also ensure that you have a valid `.env` file located in the `srcs/` directory containing all the necessary credentials (e.g., `DOMAIN_NAME`, database passwords, and WordPress credentials).
+You must also ensure that you have a valid `.env` file located in the `srcs/` directory containing all the necessary credentials (e.g., `DOMAIN_NAME`, database passwords, and WordPress credentials). This file is generated automatically by `make` on first run (see `setup.sh`); it also defines `DB_PORT`, `WP_PORT` and `NGINX_PORT`, which control the ports the three services use, so a rebuild is the only step needed to change them.
 
 ---
 
@@ -39,6 +39,7 @@ This project uses a `Makefile` located at the root of the repository to easily o
 | `make` / `make up` | Builds Docker images and starts containers in the background. Also creates the necessary local directories for volumes. |
 | `make down` | Stops containers and removes the network created by Docker Compose. |
 | `make start` / `make stop` | Starts or stops existing containers without removing them. |
+| `make db` | Opens an interactive MySQL shell inside the `mariadb` container, logged in as `root`. |
 | `make clean` | Stops containers and removes all project-related Docker images, networks, and volumes. |
 | `make fclean` | Deep clean: runs `make clean` and physically deletes persistent data folders from the host (`/home/hguerrei/data`). |
 | `make re` | Fully resets the project by running `fclean` followed by `up`. |
@@ -53,6 +54,8 @@ Once the containers are running (`make up`), access the infrastructure via your 
 - **WordPress Admin Panel:** https://hguerrei.42.fr/wp-admin
 
 > **Note:** Since the SSL/TLS certificate is self-signed, your browser will likely display a security warning. You must accept the risk to proceed.
+
+> **Note on custom ports:** If `NGINX_PORT` in `srcs/.env` is changed from the default `443`, you must include it explicitly (e.g. `https://hguerrei.42.fr:8443`) **and** type the `https://` scheme yourself — browsers don't assume HTTPS on non-standard ports, and NGINX only serves SSL, so a plain `http://` request to that port returns `400 Bad Request`.
 
 ---
 

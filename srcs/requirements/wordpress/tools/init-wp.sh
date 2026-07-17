@@ -8,10 +8,18 @@ WP_USER_PASSWORD=$(cat /run/secrets/wp_user_password)
 
 # Since all containers start at the same time, we need to wait for the database to be ready before starting WordPress.
 echo "Waiting for the connection to the database MariaDB..."
-while ! mariadb -h mariadb -u${DB_USER} -p${DB_PASSWORD} -e "SELECT 1" &> /dev/null; do
+while ! mariadb -h mariadb -P${DB_PORT} -u${DB_USER} -p${DB_PASSWORD} -e "SELECT 1" &> /dev/null; do
     sleep 3
 done
 echo "Connected to the database MariaDB!"
+
+# Nginx only serves SSL, and only on the default 443 port does a browser omit
+# it from the URL, so build the public site URL accordingly
+if [ "${NGINX_PORT}" = "443" ]; then
+    SITE_URL="https://${DOMAIN_NAME}"
+else
+    SITE_URL="https://${DOMAIN_NAME}:${NGINX_PORT}"
+fi
 
 if [ ! -f "wp-config.php" ]; then
     echo "Installing WordPress core..."
@@ -22,12 +30,12 @@ if [ ! -f "wp-config.php" ]; then
         --dbname=${DB_NAME} \
         --dbuser=${DB_USER} \
         --dbpass=${DB_PASSWORD} \
-        --dbhost=mariadb \
+        --dbhost=mariadb:${DB_PORT} \
         --allow-root
 
     echo "Installing WordPress and creating admin user..."
     wp core install \
-        --url=${DOMAIN_NAME} \
+        --url=${SITE_URL} \
         --title="Inception" \
         --admin_user=${WP_ADMIN_USER} \
         --admin_password=${WP_ADMIN_PASSWORD} \
