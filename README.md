@@ -1,152 +1,170 @@
-> *This project has been created as part of the 42 curriculum by hguerrei.*
-
 # Inception
 
-## Description
+![42 School](https://img.shields.io/badge/42-Lisboa-000000?style=flat-square&logo=42&logoColor=white)
+![Milestone](https://img.shields.io/badge/milestone-5-informational?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Base](https://img.shields.io/badge/base%20image-debian%20bookworm-A81D33?style=flat-square&logo=debian&logoColor=white)
+![TLS](https://img.shields.io/badge/TLS-1.2%20only-success?style=flat-square)
 
-This project aims to broaden my knowledge of system administration using Docker. It consists of setting up a small infrastructure composed of three services (NGINX, WordPress, MariaDB) utilizing Docker Compose inside a virtual machine.
+> A three-container WordPress infrastructure — NGINX, WordPress/PHP-FPM and MariaDB — with every image built from scratch on Debian. No `docker pull wordpress`.
 
-To fully understand the role of Docker, pulling ready-made images is avoided. Instead, each service runs in a dedicated container built from scratch using custom Dockerfiles, with the penultimate stable version of Debian serving as the base image.
+The rule that shapes this project is what it forbids: pulling a ready-made image. Every container starts from `debian:bookworm` and is assembled by hand, which means writing the TLS certificate generation, the database bootstrap, the WordPress install and the process supervision yourself. It is the difference between *using* Docker and understanding what an image actually is.
+
+The whole stack comes up with one command, from a clean machine, with no passwords committed anywhere.
+
+📁 **The project lives in [`inception/`](./inception)** — that is where you `cd` before running anything.
 
 ---
 
-## Instructions
+## Table of contents
 
-### 1. Prerequisites
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Make targets](#make-targets)
+- [The three containers](#the-three-containers)
+- [Design notes](#design-notes)
+- [Documentation](#documentation)
+- [What I took away from it](#what-i-took-away-from-it)
 
-Before running the project, configure your local machine to resolve the custom domain. Open your terminal and edit the hosts file:
+---
+
+## Architecture
+
+```
+                        host machine
+                             │
+                   https://<login>.42.fr:443
+                             │
+        ┌────────────────────▼────────────────────┐
+        │  network: inception  (bridge)           │
+        │                                         │
+        │  ┌───────────┐  fastcgi   ┌───────────┐ │
+        │  │   nginx   │───────────►│ wordpress │ │
+        │  │  TLS 1.2  │   :9000    │  php-fpm  │ │
+        │  │  :443     │            │  wp-cli   │ │
+        │  └─────┬─────┘            └─────┬─────┘ │
+        │        │                        │       │
+        │        │  shared volume         │ :3306 │
+        │        │  /var/www/html         │       │
+        │        │                  ┌─────▼─────┐ │
+        │        │                  │  mariadb  │ │
+        │        │                  └─────┬─────┘ │
+        └────────┼────────────────────────┼───────┘
+                 │                        │
+        ┌────────▼────────┐      ┌────────▼────────┐
+        │ ~/data/wordpress│      │ ~/data/mariadb  │
+        └─────────────────┘      └─────────────────┘
+                  bind-mounted named volumes
+```
+
+Only NGINX publishes a port. WordPress and MariaDB are reachable **only** from inside the `inception` bridge network — there is no route to them from the host, which is the isolation the project is really about.
+
+NGINX and WordPress share the `/var/www/html` volume: PHP-FPM writes the site, NGINX serves the static files from it directly and forwards only `.php` requests over FastCGI.
+
+## Quick start
+
+Map the domain to localhost first:
 
 ```bash
-sudo nano /etc/hosts
+echo "127.0.0.1 $(whoami).42.fr" | sudo tee -a /etc/hosts
 ```
 
-Add the following line to map the domain to your local IP:
+Then:
 
+```bash
+cd inception
+make
 ```
-127.0.0.1    hguerrei.42.fr
+
+That single command generates `srcs/.env` and the Docker secrets on first run, creates the host directories the volumes bind to, builds the three images and starts the stack. Then open **https://\<your-login\>.42.fr** — the certificate is self-signed, so the browser will warn once.
+
+## Make targets
+
+| Target | What it does |
+| --- | --- |
+| `make` / `make up` | Generates config on first run, creates volume directories, builds and starts everything detached |
+| `make down` | Stops the containers and removes them and the network |
+| `make stop` / `make start` | Pauses and resumes without removing anything |
+| `make db` | Opens an interactive MariaDB shell inside the container as `root` |
+| `make clean` | Removes this project's containers, images and volumes |
+| `make fclean` | `clean`, plus deletes the host data directories, `.env` and `secrets/` |
+| `make re` | `fclean` then `up` — a genuinely clean rebuild |
+
+`clean` is scoped to the project on purpose: `docker system prune` would take unrelated images and volumes on the host with it.
+
+## The three containers
+
+### NGINX — the only door
+
+TLS 1.2 only, on a self-signed certificate generated at build time, with the subject taken from the domain passed in as a build argument. The config file is copied in and its placeholders substituted with `sed`:
+
+```dockerfile
+RUN sed -i "s/\${DOMAIN_NAME}/${DOMAIN_NAME}/" /etc/nginx/nginx.conf && \
+    sed -i "s/\${NGINX_PORT}/${NGINX_PORT}/g" /etc/nginx/nginx.conf
 ```
 
-You must also ensure that you have a valid `.env` file located in the `srcs/` directory containing all the necessary credentials (e.g., `DOMAIN_NAME`, database passwords, and WordPress credentials). This file is generated automatically by `make` on first run (see `setup.sh`); it also defines `DB_PORT`, `WP_PORT` and `NGINX_PORT`, which control the ports the three services use, so a rebuild is the only step needed to change them.
+NGINX does not expand shell-style variables inside its own configuration, so substitution has to happen before it ever reads the file. Doing it at build time rather than at startup keeps the entrypoint trivial: `nginx -g "daemon off;"`, running in the foreground because a container lives exactly as long as its PID 1.
+
+### MariaDB — bootstrapped once, then just a database
+
+The entrypoint script is **idempotent**. It checks whether the database directory already exists and skips the whole setup if it does, so a restart is a restart and not a re-initialisation:
+
+```bash
+if [ -d "/var/lib/mysql/$DB_NAME" ]; then
+    echo "Database already exists. Starting normally..."
+else
+    # start temporarily, create database + user, set root password, shut down
+fi
+
+exec mariadbd --user=mysql
+```
+
+That final `exec` matters more than it looks. It replaces the script with the database process, so `mariadbd` *becomes* PID 1 and receives `docker stop`'s `SIGTERM` directly. The usual `mysqld_safe` wrapper does not forward signals properly, which is how you end up with a container that takes ten seconds to stop and a database that was never shut down cleanly.
+
+### WordPress — PHP-FPM, installed by script
+
+No web server here at all: just PHP-FPM listening on a TCP port for NGINX, plus `wp-cli` to do the install. Since Compose starts all three containers at once, `depends_on` only guarantees start order, not readiness — so the script waits for the database to actually answer:
+
+```bash
+while ! mariadb -h mariadb -P${DB_PORT} -u${DB_USER} -p${DB_PASSWORD} -e "SELECT 1" &> /dev/null; do
+    sleep 3
+done
+```
+
+Then, guarded by the presence of `wp-config.php` so it only runs once: download core, write the config, install the site, create an admin and a second author user. And `exec php-fpm8.2 -F` to finish, for the same PID 1 reason as MariaDB.
+
+## Design notes
+
+- **Secrets are never environment variables.** Passwords are generated by `setup.sh` with `openssl rand -base64 12`, written into `secrets/`, and mounted by Docker as read-only files at `/run/secrets/`. The containers `cat` them at startup. `.env` holds only the harmless half — database and user *names*, ports, the domain — and both `secrets/` and `srcs/.env` are gitignored. Nothing sensitive is ever in an image layer, in `docker inspect`, or in this repository.
+
+- **Everything is generated per machine.** `setup.sh` takes the login from `whoami`, so the domain, the home path and the volume locations are correct on whatever machine clones the repo. There is no hardcoded `hguerrei` anywhere in the build.
+
+- **Ports are build arguments, not constants.** `DB_PORT`, `WP_PORT` and `NGINX_PORT` come from `.env`, are passed as `ARG` into each Dockerfile, and get baked into the MariaDB config, the PHP-FPM pool and the NGINX server block. Changing a port is one line in `.env` plus a rebuild, with no file to hunt through.
+
+- **Named volumes with bind options**, rather than plain bind mounts — so the data lands in a known place on the host (`~/data/mariadb`, `~/data/wordpress`) while still being a Docker-managed volume that `docker volume` commands understand.
+
+- **`restart: always` on all three**, so the stack survives a host reboot without intervention.
+
+- **Idempotent entrypoints everywhere.** Both init scripts check whether their work is already done. The test that matters is not "does `make up` work" but "does `make up` twice in a row still work" — and it does.
+
+## Documentation
+
+The project directory carries its own docs:
+
+| File | For |
+| --- | --- |
+| [`inception/README.md`](./inception/README.md) | Full setup instructions, plus the concepts behind the project — VMs vs containers, the Docker daemon, volumes vs bind mounts, env vars vs secrets, bridge vs host networking, TLS |
+| [`inception/USER_DOC.md`](./inception/USER_DOC.md) | Running and operating the stack |
+| [`inception/DEV_DOC.md`](./inception/DEV_DOC.md) | Internals, file by file |
+
+## What I took away from it
+
+- What an image actually is: a stack of filesystem layers plus a command, and nothing more. Writing the Dockerfiles by hand is what turns `FROM` from magic into a filesystem you are responsible for.
+- Why PID 1 matters in a container, and that `exec` in an entrypoint script is the difference between a process that receives `SIGTERM` and one that gets killed after a timeout.
+- That `depends_on` orders *starts*, not *readiness* — every real distributed system needs its own wait-for-it loop, because "the container is running" and "the service is answering" are different facts.
+- The practical difference between configuration and secrets, and that the line between them is drawn by what happens if the file leaks.
+- That the real test of an init script is running it twice.
 
 ---
 
-### 2. Execution & Management
-
-This project uses a `Makefile` located at the root of the repository to easily orchestrate the Docker containers.
-
-| Command | Description |
-|---|---|
-| `make` / `make up` | Builds Docker images and starts containers in the background. Also creates the necessary local directories for volumes. |
-| `make down` | Stops containers and removes the network created by Docker Compose. |
-| `make start` / `make stop` | Starts or stops existing containers without removing them. |
-| `make db` | Opens an interactive MySQL shell inside the `mariadb` container, logged in as `root`. |
-| `make clean` | Stops containers and removes all project-related Docker images, networks, and volumes. |
-| `make fclean` | Deep clean: runs `make clean` and physically deletes persistent data folders from the host (`/home/hguerrei/data`). |
-| `make re` | Fully resets the project by running `fclean` followed by `up`. |
-
----
-
-### 3. Accessing the Services
-
-Once the containers are running (`make up`), access the infrastructure via your web browser:
-
-- **WordPress Website:** https://hguerrei.42.fr
-- **WordPress Admin Panel:** https://hguerrei.42.fr/wp-admin
-
-> **Note:** Since the SSL/TLS certificate is self-signed, your browser will likely display a security warning. You must accept the risk to proceed.
-
-> **Note on custom ports:** If `NGINX_PORT` in `srcs/.env` is changed from the default `443`, you must include it explicitly (e.g. `https://hguerrei.42.fr:8443`) **and** type the `https://` scheme yourself — browsers don't assume HTTPS on non-standard ports, and NGINX only serves SSL, so a plain `http://` request to that port returns `400 Bad Request`.
-
----
-
-## Core Concepts & Technical Choices
-
-### Virtual Machines vs. Docker
-
-#### What is a Virtual Machine?
-
-A virtual machine is a computer built out of software. It behaves like a physical computer — using RAM, storage, processors, and other hardware — but only exists as a program running on the physical machine.
-
-Three essential components make a VM work:
-
-- **Host:** The physical computer and its primary operating system.
-- **Hypervisor:** The software that creates and manages the VM, acting as a traffic cop that borrows physical resources (RAM, disk, CPU) from the host.
-- **Guest:** The operating system running inside the VM. At this level, the guest thinks it is on physical hardware.
-
-#### Docker Architecture
-
-Docker is a software platform that allows you to build, test, and deploy applications quickly by packaging them into standardized, isolated units called **containers**.
-
-- **Docker Image:** The result of a `Dockerfile` — a file containing instructions on how the container should be built.
-- **Docker Containers:** Docker doesn't use a Hypervisor or require a full guest OS like a VM. Instead, it uses a background program called the **Docker Engine**, which allows all containers to securely share the host's kernel. A container only holds the application and the exact files, libraries, and dependencies it needs.
-
-#### The Comparison
-
-| | Docker | Virtual Machine |
-|---|---|---|
-| **Architecture** | Shares host OS kernel via Docker Engine | Hypervisor emulates hardware; requires a full guest OS |
-| **Speed** | Starts in milliseconds (no OS boot) | Boots an entire OS; can take minutes |
-| **Resource Usage** | Dynamic — uses only what's needed at that moment | Static — resources are permanently allocated |
-
----
-
-### The Docker Daemon
-
-The Docker Daemon is a background process that manages Docker objects. It acts as an intermediary, listening for requests from the Docker API. The Docker Client sends commands to the Daemon to execute. It manages the lifecycle of containers (starting and stopping) and resources such as memory, networks, and storage.
-
----
-
-### Data Persistence: Volumes vs. Bind Mounts
-
-Containers are ephemeral — if you shut one down, all modified data inside it is lost. For example, without persistence, stopping the MariaDB container would delete the database.
-
-- **Docker Volumes:** Save data permanently by bypassing the container's temporary file system and writing directly to a Docker-managed location on the host. Volumes are easier to back up, migrate, or clean.
-- **Bind Mounts:** Map a specific, user-defined folder from the host machine directly into the container.
-
----
-
-### Security: Environment Variables vs. Secrets
-
-- **Environment Variables:** Dynamic values stored outside the application (usually in a `.env` file). Great for centralizing configuration, but visible to anyone with system access — making them unsafe for sensitive data.
-- **Docker Secrets:** A built-in security feature for sensitive information (passwords, API keys). Docker encrypts the secret and controls access, mounting it as a temporary, read-only file in the container's memory at `/run/secrets/<secret_name>`.
-
----
-
-### Networking: Docker Network vs. Host Network
-
-- **Docker Network (Bridge):** A virtual, software-defined network created by the Docker Engine. Establishes a private environment where containers communicate securely with each other while remaining isolated from external traffic.
-- **Host Network:** Removes standard network isolation entirely, allowing the container to bind directly to the host machine's network interfaces.
-
----
-
-### Encryption: TLSv1.2 & TLSv1.3
-
-TLS (Transport Layer Security) is the cryptographic protocol that provides end-to-end encryption for data sent over a network — putting the "S" (Secure) in HTTPS.
-
-> **The Armored Truck Analogy:** Standard HTTP is like writing your password on a postcard — anyone can read it. HTTPS (using TLS) is like putting your password in a heavily armored truck with a unique padlock.
-
-Before data is sent, the client and server perform a **handshake**: they verify identities using SSL/TLS certificates and agree on an encryption method.
-
-- **TLSv1.2 (The Reliable Veteran):** Released in 2008. Extremely stable and widely supported, but retains support for outdated algorithms, making the handshake slower.
-- **TLSv1.3 (The Modern Standard):** Released in 2018. A major overhaul that removed vulnerable algorithms ("secure by default") and streamlined the handshake to a single round-trip, improving both security and speed.
-
----
-
-## Resources & Links
-
-- [TLS Transport Layer Security Protocol](https://en.wikipedia.org/wiki/Transport_Layer_Security)
-- [Docker Overview](https://docs.docker.com/get-started/overview/)
-- [How does Docker Daemon work?](https://docs.docker.com/engine/reference/commandline/dockerd/)
-- [Docker Network Connect](https://docs.docker.com/engine/reference/commandline/network_connect/)
-- [Intro to Docker](https://www.youtube.com/watch?v=Ud7Npgi6x8E)
-- [Docker in 100 seconds](https://www.youtube.com/watch?v=Gjnup-PuquQ)
-- [Docker basics](https://www.youtube.com/watch?v=DQdB7wFEygo&t=491s)
-
-
-AI usage:
-- Discuss Architecture and structure design ideias;
-- Get technical information of some concepts;
-
-> *Disclouser: AI was used consciously and critically, acting as a supplementary learning tool to accelerate understanding, not to skip learning steps. All architectural decisions, code implementations, and debugging sessions were manually driven.*
-> 
-</details>
+**Author** — Hugo Pinto ([`hguerrei`](https://profile.intra.42.fr/users/hguerrei) · [@Redgtxt](https://github.com/Redgtxt))
